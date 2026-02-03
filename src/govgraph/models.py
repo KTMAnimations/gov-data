@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
+
+from govgraph.security import is_safe_webhook_url
 
 
 class HealthResponse(BaseModel):
@@ -51,10 +53,36 @@ class OpportunitiesResponse(BaseModel):
     raw: dict[str, Any]
 
 
+# Allowed event types for webhooks
+ALLOWED_EVENT_TYPES = frozenset({
+    "sam.opportunity.created",
+    "sam.opportunity.updated",
+    "sam.opportunity.deleted",
+})
+
+
 class WebhookSubscriptionCreate(BaseModel):
     url: HttpUrl
-    event_type: str
+    event_type: str = Field(..., min_length=1, max_length=100)
     filters: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("url")
+    @classmethod
+    def validate_webhook_url(cls, v: HttpUrl) -> HttpUrl:
+        """Validate that the webhook URL is safe (not targeting internal resources)."""
+        url_str = str(v)
+        is_safe, error_msg = is_safe_webhook_url(url_str)
+        if not is_safe:
+            raise ValueError(f"Invalid webhook URL: {error_msg}")
+        return v
+
+    @field_validator("event_type")
+    @classmethod
+    def validate_event_type(cls, v: str) -> str:
+        """Validate that the event type is allowed."""
+        if v not in ALLOWED_EVENT_TYPES:
+            raise ValueError(f"Invalid event_type. Allowed values: {', '.join(sorted(ALLOWED_EVENT_TYPES))}")
+        return v
 
 
 class WebhookSubscription(BaseModel):
