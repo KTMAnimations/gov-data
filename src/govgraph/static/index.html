@@ -5,57 +5,57 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>GovGraph Console</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=20260203" />
     <script defer src="https://cdn.jsdelivr.net/npm/d3@7"></script>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/app.js?v=20260203"></script>
   </head>
   <body>
     <div class="app">
-      <header class="topbar">
-        <div class="brand">
-          <div class="logo">GovGraph</div>
-          <div class="tag">Procurement + contractor data, normalized</div>
+      <header class="header">
+        <div class="header-left">
+          <a href="/" class="logo">GovGraph</a>
+          <span class="tagline">Procurement &amp; contractor data</span>
         </div>
-        <div class="top-actions">
-          <div class="status" id="status">Connecting…</div>
-          <button class="btn btn-secondary" id="open-docs" type="button">API docs</button>
+        <div class="header-right">
+          <span class="connection-status" id="status">Connecting...</span>
+          <button class="header-link" id="open-docs" type="button">API Documentation</button>
         </div>
       </header>
 
-      <div class="layout">
-        <aside class="sidebar">
-          <nav class="nav" aria-label="Primary">
-            <button class="nav-item is-active" data-route="opportunities" type="button">Opportunities</button>
-            <button class="nav-item" data-route="contractors" type="button">Contractors</button>
-            <button class="nav-item" data-route="webhooks" type="button">Webhooks</button>
-            <button class="nav-item" data-route="sources" type="button">Sources</button>
-          </nav>
+      <nav class="nav">
+        <button class="nav-link is-active" data-route="opportunities" type="button">Opportunities</button>
+        <button class="nav-link" data-route="contractors" type="button">Contractors</button>
+        <button class="nav-link" data-route="webhooks" type="button">Webhooks</button>
+        <button class="nav-link" data-route="sources" type="button">Data Sources</button>
+      </nav>
 
-          <section class="card">
-            <h3 class="card-title">Auth</h3>
-            <label class="label" for="api-key">API key (X-Api-Key)</label>
-            <div class="row">
-              <input class="input" id="api-key" type="password" placeholder="optional" autocomplete="off" />
-              <button class="btn" id="save-key" type="button">Save</button>
+      <div class="container">
+        <div class="layout">
+          <main class="main" id="view" aria-live="polite"></main>
+
+          <aside class="sidebar">
+            <div class="sidebar-section">
+              <div class="sidebar-title">Authentication</div>
+              <label class="field-label" for="api-key">API Key</label>
+              <input class="field-input" id="api-key" type="password" placeholder="Enter API key" autocomplete="off" />
+              <button class="btn-small" id="save-key" type="button">Save Key</button>
+              <p class="hint" id="auth-hint"></p>
             </div>
-            <p class="muted" id="auth-hint"></p>
-          </section>
 
-          <section class="card">
-            <h3 class="card-title">Tips</h3>
-            <ul class="list">
-              <li>Start with an <b>opportunity search</b> to validate upstream connectivity.</li>
-              <li>Use <b>contractor profiles</b> to join SAM + USAspending by UEI.</li>
-              <li>Webhooks are easiest to test using a request bin or local tunnel.</li>
-            </ul>
-          </section>
-        </aside>
-
-        <main class="main" id="view" aria-live="polite"></main>
+            <div class="sidebar-section">
+              <div class="sidebar-title">Quick Start</div>
+              <ul class="help-list">
+                <li>Search opportunities to verify connection</li>
+                <li>Look up contractors by UEI number</li>
+                <li>Set up webhooks for automated alerts</li>
+              </ul>
+            </div>
+          </aside>
+        </div>
       </div>
 
       <footer class="footer">
-        <span>As of Feb 3, 2026 • Upstream APIs can change; GovGraph preserves provenance and timestamps.</span>
+        GovGraph v0.1.0 &mdash; Data sourced from SAM.gov and USAspending.gov. Timestamps preserved.
       </footer>
     </div>
   </body>

@@ -1,3 +1,4 @@
+// GovGraph Console - Professional Business Dashboard
 const $ = (sel) => document.querySelector(sel);
 
 const state = {
@@ -58,10 +59,10 @@ function el(tag, attrs = {}, children = []) {
 }
 
 function fmtDate(iso) {
-  if (!iso) return "—";
+  if (!iso) return "-";
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function prettyJson(obj) {
@@ -71,8 +72,8 @@ function prettyJson(obj) {
 function renderPage(title, subtitle, bodyChildren) {
   const view = $("#view");
   view.innerHTML = "";
-  view.appendChild(el("h1", { class: "h1" }, [title]));
-  view.appendChild(el("p", { class: "sub" }, [subtitle]));
+  view.appendChild(el("h1", { class: "page-title" }, [title]));
+  view.appendChild(el("p", { class: "page-subtitle" }, [subtitle]));
   for (const child of bodyChildren) view.appendChild(child);
 }
 
@@ -82,13 +83,19 @@ function renderError(err) {
   const hint = isUpstream
     ? detail.message
     : err?.status === 401
-      ? "Unauthorized. If GOVGRAPH_API_KEY is set on the server, add it in the Auth panel."
+      ? "Unauthorized. If GOVGRAPH_API_KEY is set on the server, add it in the sidebar."
       : "Check upstream connectivity and keys (.env).";
-  return el("div", { class: "card" }, [
-    el("div", { class: "pill bad" }, ["Error", ` • ${err.message}`]),
-    el("p", { class: "muted" }, [hint]),
-    el("div", { class: "code" }, [prettyJson(err.payload || { message: err.message, status: err.status })]),
+
+  const box = el("div", { class: "status-box error" }, [
+    el("div", { class: "status-title" }, ["Error"]),
+    el("div", { class: "status-text" }, [hint]),
   ]);
+
+  const details = el("div", { class: "code-block" }, [
+    prettyJson(err.payload || { message: err.message, status: err.status }),
+  ]);
+
+  return el("div", {}, [box, details]);
 }
 
 function attachNav() {
@@ -117,9 +124,9 @@ async function loadConfig() {
     state.config = await apiFetch("/public/config");
     const hint = $("#auth-hint");
     if (state.config.requires_api_key) {
-      hint.textContent = "This server requires an API key. Save it above to use the console.";
+      hint.textContent = "This server requires an API key.";
     } else {
-      hint.textContent = "No API key required (local dev default).";
+      hint.textContent = "No API key required.";
     }
     setStatus("Connected", "ok");
   } catch (e) {
@@ -129,9 +136,13 @@ async function loadConfig() {
 
 function renderSources() {
   const sources = state.config?.sources || [];
-  const table = el("table", { class: "table" }, [
+  const table = el("table", { class: "data-table" }, [
     el("thead", {}, [
-      el("tr", {}, [el("th", {}, ["Source"]), el("th", {}, ["Base URL"]), el("th", {}, ["Configured"])]),
+      el("tr", {}, [
+        el("th", {}, ["Source"]),
+        el("th", {}, ["Base URL"]),
+        el("th", {}, ["Status"]),
+      ]),
     ]),
     el(
       "tbody",
@@ -139,32 +150,37 @@ function renderSources() {
       sources.map((s) =>
         el("tr", {}, [
           el("td", {}, [s.name]),
-          el("td", {}, [el("span", { class: "code" }, [s.base_url])]),
-          el("td", {}, [s.configured ? "yes" : "no"]),
+          el("td", { class: "mono" }, [s.base_url]),
+          el("td", {}, [
+            el("span", { class: s.configured ? "badge badge-success" : "badge badge-error" }, [
+              s.configured ? "Configured" : "Not configured",
+            ]),
+          ]),
         ])
       )
     ),
   ]);
-  renderPage("Sources", "Configured upstream base URLs and feature flags.", [table]);
+  renderPage("Data Sources", "Configured upstream API endpoints and their status.", [table]);
 }
 
 function renderOpportunities() {
   const sam = (state.config?.sources || []).find((s) => s.name === "sam.opportunities");
   const samConfigured = !!sam?.configured;
 
-  const q = el("input", { class: "input", placeholder: "search keywords (e.g., cybersecurity)", value: "software" });
-  const postedFrom = el("input", { class: "input", type: "date" });
-  const postedTo = el("input", { class: "input", type: "date" });
-  const limit = el("input", { class: "input", type: "number", value: "25", min: "1", max: "100" });
-  const offset = el("input", { class: "input", type: "number", value: "0", min: "0" });
-  const results = el("div", { class: "grid" }, []);
-  const chartWrap = el("div", { class: "card" }, [el("div", { class: "card-title" }, ["Opportunities over time"])]);
-  const chart = el("div", { id: "opp-chart" }, []);
-  chartWrap.appendChild(chart);
+  const q = el("input", { class: "field-input", placeholder: "Enter search keywords", value: "software" });
+  const postedFrom = el("input", { class: "field-input", type: "date" });
+  const postedTo = el("input", { class: "field-input", type: "date" });
+  const limit = el("input", { class: "field-input", type: "number", value: "25", min: "1", max: "100", style: "width: 80px" });
+  const offset = el("input", { class: "field-input", type: "number", value: "0", min: "0", style: "width: 80px" });
+  const results = el("div", {}, []);
+  const chartContainer = el("div", { class: "chart-container" }, [
+    el("div", { class: "chart-title" }, ["Opportunities by Posted Date"]),
+    el("div", { id: "opp-chart" }, []),
+  ]);
 
   async function runSearch() {
     results.innerHTML = "";
-    results.appendChild(el("div", { class: "pill" }, ["Loading…"]));
+    results.appendChild(el("div", { class: "status-box info" }, [el("span", {}, ["Loading results..."])]));
     try {
       const params = new URLSearchParams();
       if (q.value.trim()) params.set("q", q.value.trim());
@@ -176,25 +192,33 @@ function renderOpportunities() {
       const data = await apiFetch(`/v1/opportunities?${params.toString()}`);
       const items = data.items || [];
       results.innerHTML = "";
-      results.appendChild(el("div", { class: "pill ok" }, [`${items.length} items`]));
 
-      const table = el("table", { class: "table" }, [
+      results.appendChild(
+        el("div", { class: "results-count" }, [
+          "Showing ",
+          el("strong", {}, [String(items.length)]),
+          " results",
+        ])
+      );
+
+      const table = el("table", { class: "data-table" }, [
         el("thead", {}, [
-          el("tr", {}, [el("th", {}, ["ID"]), el("th", {}, ["Title"]), el("th", {}, ["Posted"])]),
+          el("tr", {}, [el("th", {}, ["ID"]), el("th", {}, ["Title"]), el("th", {}, ["Posted Date"])]),
         ]),
         el(
           "tbody",
           {},
           items.map((it) =>
             el("tr", {}, [
-              el("td", {}, [el("span", { class: "code" }, [it.external_id])]),
-              el("td", {}, [it.title || "—"]),
+              el("td", { class: "mono" }, [it.external_id]),
+              el("td", {}, [it.title || "-"]),
               el("td", {}, [fmtDate(it.posted_at)]),
             ])
           )
         ),
       ]);
       results.appendChild(table);
+      results.appendChild(chartContainer);
 
       renderOpportunitiesChart(items);
     } catch (err) {
@@ -203,39 +227,49 @@ function renderOpportunities() {
     }
   }
 
-  const form = el("div", { class: "grid" }, [
-    !samConfigured
-      ? el("div", { class: "card" }, [
-          el("div", { class: "pill bad" }, ["SAM.gov not configured"]),
-          el("p", { class: "muted" }, [
-            "Opportunity search requires an api.data.gov key. Set ",
-            el("span", { class: "code" }, ["GOVGRAPH_API_DATA_GOV_KEY"]),
-            " in ",
-            el("span", { class: "code" }, [".env"]),
-            ", restart GovGraph, then try again.",
-          ]),
-        ])
-      : null,
-    el("div", { class: "grid grid-2" }, [
-      el("div", {}, [el("div", { class: "label" }, ["Query"]), q]),
-      el("div", {}, [
-        el("div", { class: "label" }, ["Limit / Offset"]),
-        el("div", { class: "row" }, [limit, offset]),
+  const warningBox = !samConfigured
+    ? el("div", { class: "status-box warning" }, [
+        el("div", { class: "status-title" }, ["Configuration Required"]),
+        el("div", { class: "status-text" }, [
+          "Opportunity search requires an api.data.gov key. Set GOVGRAPH_API_DATA_GOV_KEY in .env and restart the server.",
+        ]),
+      ])
+    : null;
+
+  const formContent = el("div", { class: "form-grid" }, [
+    warningBox,
+    el("div", { class: "form-row" }, [
+      el("div", { class: "form-group form-group-half" }, [
+        el("label", { class: "field-label" }, ["Search Query"]),
+        q,
+      ]),
+      el("div", { class: "form-group" }, [
+        el("label", { class: "field-label" }, ["Limit"]),
+        limit,
+      ]),
+      el("div", { class: "form-group" }, [
+        el("label", { class: "field-label" }, ["Offset"]),
+        offset,
       ]),
     ]),
-    el("div", { class: "grid grid-2" }, [
-      el("div", {}, [el("div", { class: "label" }, ["Posted from"]), postedFrom]),
-      el("div", {}, [el("div", { class: "label" }, ["Posted to"]), postedTo]),
+    el("div", { class: "form-row" }, [
+      el("div", { class: "form-group form-group-half" }, [
+        el("label", { class: "field-label" }, ["Posted From"]),
+        postedFrom,
+      ]),
+      el("div", { class: "form-group form-group-half" }, [
+        el("label", { class: "field-label" }, ["Posted To"]),
+        postedTo,
+      ]),
     ]),
-    el("div", { class: "row" }, [
+    el("div", { class: "form-actions" }, [
       el("button", { class: "btn", type: "button", onclick: runSearch }, ["Search"]),
-      el("button", { class: "btn btn-secondary", type: "button", onclick: () => (results.innerHTML = "") }, ["Clear"]),
+      el("button", { class: "btn btn-secondary", type: "button", onclick: () => (results.innerHTML = "") }, ["Clear Results"]),
     ]),
-    chartWrap,
     results,
   ]);
 
-  renderPage("Opportunities", "Search SAM.gov opportunities and visualize posting volume.", [form]);
+  renderPage("Opportunities", "Search SAM.gov procurement opportunities.", [formContent]);
   if (samConfigured) runSearch();
 }
 
@@ -243,7 +277,7 @@ function renderOpportunitiesChart(items) {
   const chartEl = $("#opp-chart");
   chartEl.innerHTML = "";
   if (typeof window.d3 === "undefined") {
-    chartEl.appendChild(el("p", { class: "muted" }, ["D3 failed to load (check internet access)."]));
+    chartEl.appendChild(el("p", { class: "hint" }, ["Chart library failed to load."]));
     return;
   }
   const d3 = window.d3;
@@ -259,13 +293,13 @@ function renderOpportunitiesChart(items) {
     .sort((a, b) => (a.day < b.day ? -1 : 1));
 
   if (!data.length) {
-    chartEl.appendChild(el("p", { class: "muted" }, ["No dated results to chart."]));
+    chartEl.appendChild(el("p", { class: "hint" }, ["No dated results to display."]));
     return;
   }
 
-  const width = chartEl.clientWidth || 760;
-  const height = 220;
-  const margin = { top: 14, right: 14, bottom: 30, left: 40 };
+  const width = chartEl.clientWidth || 700;
+  const height = 200;
+  const margin = { top: 10, right: 10, bottom: 30, left: 40 };
   const svg = d3
     .select(chartEl)
     .append("svg")
@@ -276,7 +310,7 @@ function renderOpportunitiesChart(items) {
     .scaleBand()
     .domain(data.map((d) => d.day))
     .range([margin.left, width - margin.right])
-    .padding(0.25);
+    .padding(0.2);
 
   const y = d3
     .scaleLinear()
@@ -286,15 +320,14 @@ function renderOpportunitiesChart(items) {
 
   svg
     .append("g")
-    .attr("fill", "#2563eb")
+    .attr("fill", "#ff9900")
     .selectAll("rect")
     .data(data)
     .join("rect")
     .attr("x", (d) => x(d.day))
     .attr("y", (d) => y(d.count))
     .attr("height", (d) => y(0) - y(d.count))
-    .attr("width", x.bandwidth())
-    .attr("rx", 6);
+    .attr("width", x.bandwidth());
 
   svg
     .append("g")
@@ -304,15 +337,15 @@ function renderOpportunitiesChart(items) {
         .axisBottom(x)
         .tickValues(data.length > 8 ? data.filter((_, i) => i % Math.ceil(data.length / 8) === 0).map((d) => d.day) : null)
     )
-    .call((g) => g.selectAll("text").attr("font-size", 10).attr("fill", "#475569"))
-    .call((g) => g.selectAll("path,line").attr("stroke", "#e2e8f0"));
+    .call((g) => g.selectAll("text").attr("font-size", 11).attr("fill", "#616161"))
+    .call((g) => g.selectAll("path,line").attr("stroke", "#e0e0e0"));
 
   svg
     .append("g")
     .attr("transform", `translate(${margin.left},0)`)
     .call(d3.axisLeft(y).ticks(4))
-    .call((g) => g.selectAll("text").attr("font-size", 10).attr("fill", "#475569"))
-    .call((g) => g.selectAll("path,line").attr("stroke", "#e2e8f0"));
+    .call((g) => g.selectAll("text").attr("font-size", 11).attr("fill", "#616161"))
+    .call((g) => g.selectAll("path,line").attr("stroke", "#e0e0e0"));
 }
 
 function extractAwards(raw) {
@@ -334,16 +367,15 @@ function renderAwardsChart(awards) {
   const chartEl = $("#awards-chart");
   chartEl.innerHTML = "";
   if (typeof window.d3 === "undefined") {
-    chartEl.appendChild(el("p", { class: "muted" }, ["D3 failed to load (check internet access)."]));
+    chartEl.appendChild(el("p", { class: "hint" }, ["Chart library failed to load."]));
     return;
   }
   if (!awards.length) {
-    chartEl.appendChild(el("p", { class: "muted" }, ["No award rows to chart (upstream may be unavailable or schema changed)."]));
+    chartEl.appendChild(el("p", { class: "hint" }, ["No award data available to display."]));
     return;
   }
   const d3 = window.d3;
 
-  // Aggregate by agency
   const sums = new Map();
   for (const a of awards) sums.set(a.agency, (sums.get(a.agency) || 0) + a.amount);
   const data = Array.from(sums.entries())
@@ -351,9 +383,9 @@ function renderAwardsChart(awards) {
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 10);
 
-  const width = chartEl.clientWidth || 760;
-  const height = 260;
-  const margin = { top: 14, right: 14, bottom: 30, left: 170 };
+  const width = chartEl.clientWidth || 700;
+  const height = 240;
+  const margin = { top: 10, right: 10, bottom: 30, left: 160 };
 
   const svg = d3
     .select(chartEl)
@@ -365,7 +397,7 @@ function renderAwardsChart(awards) {
     .scaleBand()
     .domain(data.map((d) => d.agency))
     .range([margin.top, height - margin.bottom])
-    .padding(0.25);
+    .padding(0.2);
 
   const x = d3
     .scaleLinear()
@@ -375,96 +407,102 @@ function renderAwardsChart(awards) {
 
   svg
     .append("g")
-    .attr("fill", "#06b6d4")
+    .attr("fill", "#232f3e")
     .selectAll("rect")
     .data(data)
     .join("rect")
     .attr("x", x(0))
     .attr("y", (d) => y(d.agency))
     .attr("width", (d) => x(d.amount) - x(0))
-    .attr("height", y.bandwidth())
-    .attr("rx", 6);
+    .attr("height", y.bandwidth());
 
   svg
     .append("g")
     .attr("transform", `translate(0,${height - margin.bottom})`)
     .call(d3.axisBottom(x).ticks(5).tickFormat((v) => `$${d3.format(".2s")(v)}`))
-    .call((g) => g.selectAll("text").attr("font-size", 10).attr("fill", "#475569"))
-    .call((g) => g.selectAll("path,line").attr("stroke", "#e2e8f0"));
+    .call((g) => g.selectAll("text").attr("font-size", 11).attr("fill", "#616161"))
+    .call((g) => g.selectAll("path,line").attr("stroke", "#e0e0e0"));
 
   svg
     .append("g")
     .attr("transform", `translate(${margin.left},0)`)
     .call(d3.axisLeft(y).tickSizeOuter(0))
-    .call((g) => g.selectAll("text").attr("font-size", 10).attr("fill", "#334155"))
-    .call((g) => g.selectAll("path,line").attr("stroke", "#e2e8f0"));
+    .call((g) => g.selectAll("text").attr("font-size", 11).attr("fill", "#424242"))
+    .call((g) => g.selectAll("path,line").attr("stroke", "#e0e0e0"));
 }
 
 function renderContractors() {
   const sam = (state.config?.sources || []).find((s) => s.name === "sam.entity");
   const samConfigured = !!sam?.configured;
 
-  const uei = el("input", { class: "input", placeholder: "UEI (e.g., ABCDEFGHIJKLM)", value: "" });
-  const out = el("div", { class: "grid" }, []);
-  const chartCard = el("div", { class: "card" }, [
-    el("div", { class: "card-title" }, ["Awards by awarding agency (top 10)"]),
+  const uei = el("input", { class: "field-input", placeholder: "Enter UEI (e.g., ABCDEFGHIJKLM)", value: "" });
+  const out = el("div", {}, []);
+  const chartContainer = el("div", { class: "chart-container" }, [
+    el("div", { class: "chart-title" }, ["Awards by Agency (Top 10)"]),
     el("div", { id: "awards-chart" }, []),
   ]);
 
   async function runLookup() {
     out.innerHTML = "";
-    out.appendChild(el("div", { class: "pill" }, ["Loading…"]));
+    out.appendChild(el("div", { class: "status-box info" }, [el("span", {}, ["Loading profile..."])]));
     try {
       const data = await apiFetch(`/v1/contractors/${encodeURIComponent(uei.value.trim())}`);
       out.innerHTML = "";
-      out.appendChild(el("div", { class: "pill ok" }, ["Profile loaded"]));
-      out.appendChild(chartCard);
+
+      out.appendChild(
+        el("div", { class: "status-box success" }, [
+          el("span", {}, ["Profile loaded for UEI: " + data.uei]),
+        ])
+      );
+
+      out.appendChild(chartContainer);
       renderAwardsChart(extractAwards(data.usaspending_awards));
 
-      out.appendChild(el("div", { class: "hr" }, []));
-      out.appendChild(el("div", { class: "card-title" }, ["Raw JSON (provenance preserved)"]));
-      out.appendChild(el("div", { class: "code" }, [prettyJson(data)]));
+      out.appendChild(el("hr", { class: "divider" }, []));
+      out.appendChild(el("div", { class: "card-title" }, ["Raw JSON Response"]));
+      out.appendChild(el("div", { class: "code-block" }, [prettyJson(data)]));
     } catch (err) {
       out.innerHTML = "";
       out.appendChild(renderError(err));
     }
   }
 
-  const form = el("div", { class: "grid" }, [
-    !samConfigured
-      ? el("div", { class: "card" }, [
-          el("div", { class: "pill" }, ["Heads up"]),
-          el("p", { class: "muted" }, [
-            "SAM entity + exclusions lookups may be unavailable until you set ",
-            el("span", { class: "code" }, ["GOVGRAPH_API_DATA_GOV_KEY"]),
-            " in ",
-            el("span", { class: "code" }, [".env"]),
-            " and restart GovGraph. USAspending may still work.",
-          ]),
-        ])
-      : null,
-    el("div", {}, [el("div", { class: "label" }, ["UEI"]), uei]),
-    el("div", { class: "row" }, [
-      el("button", { class: "btn", type: "button", onclick: runLookup }, ["Lookup contractor"]),
+  const warningBox = !samConfigured
+    ? el("div", { class: "status-box warning" }, [
+        el("div", { class: "status-title" }, ["Partial Data Available"]),
+        el("div", { class: "status-text" }, [
+          "SAM entity and exclusions lookups require GOVGRAPH_API_DATA_GOV_KEY. USAspending data may still work.",
+        ]),
+      ])
+    : null;
+
+  const formContent = el("div", { class: "form-grid" }, [
+    warningBox,
+    el("div", { class: "form-group" }, [
+      el("label", { class: "field-label" }, ["Unique Entity Identifier (UEI)"]),
+      uei,
+    ]),
+    el("div", { class: "form-actions" }, [
+      el("button", { class: "btn", type: "button", onclick: runLookup }, ["Look Up Contractor"]),
       el("button", { class: "btn btn-secondary", type: "button", onclick: () => (out.innerHTML = "") }, ["Clear"]),
     ]),
     out,
   ]);
 
-  renderPage("Contractors", "Join SAM.gov entity/exclusions + USAspending awards by UEI.", [form]);
+  renderPage("Contractors", "Look up contractor profiles by joining SAM.gov and USAspending data.", [formContent]);
 }
 
 function renderWebhooks() {
-  const url = el("input", { class: "input", placeholder: "https://example.com/webhook" });
-  const eventType = el("input", { class: "input", value: "sam.opportunity.created" });
-  const filters = el("textarea", { class: "textarea" }, []);
+  const url = el("input", { class: "field-input", placeholder: "https://your-endpoint.com/webhook" });
+  const eventType = el("input", { class: "field-input", value: "sam.opportunity.created" });
+  const filters = el("textarea", { class: "field-textarea" }, []);
   filters.value = JSON.stringify({ q: "software" }, null, 2);
 
-  const out = el("div", { class: "grid" }, []);
+  const out = el("div", {}, []);
 
   async function create() {
     out.innerHTML = "";
-    out.appendChild(el("div", { class: "pill" }, ["Creating…"]));
+    out.appendChild(el("div", { class: "status-box info" }, [el("span", {}, ["Creating subscription..."])]));
     try {
       const payload = {
         url: url.value.trim(),
@@ -477,42 +515,61 @@ function renderWebhooks() {
         body: JSON.stringify(payload),
       });
       out.innerHTML = "";
-      out.appendChild(el("div", { class: "pill ok" }, [`Created ${sub.id}`]));
+      out.appendChild(
+        el("div", { class: "status-box success" }, [
+          el("span", {}, ["Subscription created: " + sub.id]),
+        ])
+      );
 
       const testBtn = el(
         "button",
         {
-          class: "btn",
+          class: "btn btn-secondary",
           type: "button",
           onclick: async () => {
             const res = await apiFetch(`/v1/webhooks/subscriptions/${sub.id}/test`, { method: "POST" });
-            out.appendChild(el("div", { class: "pill" }, [`Test delivery: ${res.delivery_id}`]));
+            out.appendChild(
+              el("div", { class: "status-box info", style: "margin-top: 12px" }, [
+                el("span", {}, ["Test delivery sent: " + res.delivery_id]),
+              ])
+            );
           },
         },
-        ["Send test"]
+        ["Send Test Webhook"]
       );
 
-      out.appendChild(el("div", { class: "row" }, [testBtn]));
-      out.appendChild(el("div", { class: "card-title" }, ["Subscription JSON"]));
-      out.appendChild(el("div", { class: "code" }, [prettyJson(sub)]));
+      out.appendChild(el("div", { class: "form-actions", style: "margin-top: 12px" }, [testBtn]));
+      out.appendChild(el("div", { class: "card-title", style: "margin-top: 16px" }, ["Subscription Details"]));
+      out.appendChild(el("div", { class: "code-block" }, [prettyJson(sub)]));
     } catch (err) {
       out.innerHTML = "";
       out.appendChild(renderError(err));
     }
   }
 
-  const form = el("div", { class: "grid" }, [
-    el("div", {}, [el("div", { class: "label" }, ["Webhook URL"]), url]),
-    el("div", {}, [el("div", { class: "label" }, ["Event type"]), eventType]),
-    el("div", {}, [el("div", { class: "label" }, ["Filters (JSON)"]), filters]),
-    el("div", { class: "row" }, [el("button", { class: "btn", type: "button", onclick: create }, ["Create subscription"])]),
+  const formContent = el("div", { class: "form-grid" }, [
+    el("div", { class: "form-group" }, [
+      el("label", { class: "field-label" }, ["Webhook URL"]),
+      url,
+    ]),
+    el("div", { class: "form-group" }, [
+      el("label", { class: "field-label" }, ["Event Type"]),
+      eventType,
+    ]),
+    el("div", { class: "form-group" }, [
+      el("label", { class: "field-label" }, ["Filters (JSON)"]),
+      filters,
+    ]),
+    el("div", { class: "form-actions" }, [
+      el("button", { class: "btn", type: "button", onclick: create }, ["Create Subscription"]),
+    ]),
     out,
   ]);
 
   renderPage(
     "Webhooks",
-    "Create a subscription and receive events. Enable the background poller in .env to emit real SAM opportunity events.",
-    [form]
+    "Create webhook subscriptions to receive event notifications. Enable the background poller in .env for live events.",
+    [formContent]
   );
 }
 
