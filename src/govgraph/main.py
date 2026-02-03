@@ -5,10 +5,12 @@ import json
 import sqlite3
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, date
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 
 from govgraph.auth import require_api_key
 from govgraph.clients.http import CachedHttpClient
@@ -18,13 +20,16 @@ from govgraph.db import connect, init_db
 from govgraph.models import (
     ContractorProfile,
     HealthResponse,
+    OpportunitiesResponse,
+    OpportunityItem,
+    PublicConfig,
     SourcesResponse,
     SourceStatus,
     WebhookDelivery,
     WebhookSubscription,
     WebhookSubscriptionCreate,
 )
-from govgraph.poller import run_opportunity_poller
+from govgraph.poller import normalize_sam_opportunities, run_opportunity_poller
 from govgraph.settings import Settings
 from govgraph.webhooks import generate_secret, send_webhook
 
@@ -62,6 +67,25 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="GovGraph", version="0.1.0", lifespan=_lifespan)
 
 
+def _source_statuses() -> list[SourceStatus]:
+    return [
+        SourceStatus(name="sam.opportunities", base_url=str(settings.sam_opportunities_base_url), configured=True),
+        SourceStatus(name="sam.entity", base_url=str(settings.sam_entity_base_url), configured=True),
+        SourceStatus(name="sam.exclusions", base_url=str(settings.sam_exclusions_base_url), configured=True),
+        SourceStatus(name="usaspending", base_url=str(settings.usaspending_base_url), configured=True),
+    ]
+
+
+@app.get("/public/config", response_model=PublicConfig)
+async def public_config() -> PublicConfig:
+    return PublicConfig(
+        version="0.1.0",
+        requires_api_key=bool(settings.api_key),
+        enable_poller=bool(settings.enable_poller),
+        sources=_source_statuses(),
+    )
+
+
 def _clients() -> tuple[CachedHttpClient, SamClient, UsaSpendingClient, httpx.AsyncClient]:
     # Per-request client to keep things simple and avoid global event-loop coupling.
     client = httpx.AsyncClient()
@@ -78,14 +102,7 @@ async def healthz() -> HealthResponse:
 
 @app.get("/v1/sources", response_model=SourcesResponse, dependencies=[Depends(require_api_key(settings))])
 async def sources() -> SourcesResponse:
-    return SourcesResponse(
-        sources=[
-            SourceStatus(name="sam.opportunities", base_url=str(settings.sam_opportunities_base_url), configured=True),
-            SourceStatus(name="sam.entity", base_url=str(settings.sam_entity_base_url), configured=True),
-            SourceStatus(name="sam.exclusions", base_url=str(settings.sam_exclusions_base_url), configured=True),
-            SourceStatus(name="usaspending", base_url=str(settings.usaspending_base_url), configured=True),
-        ]
-    )
+    return SourcesResponse(sources=_source_statuses())
 
 
 @app.get(
@@ -149,6 +166,38 @@ async def opportunities_search(
         except httpx.HTTPStatusError as e:
             raise HTTPException(status_code=e.response.status_code, detail=e.response.text) from e
         return {"source": "sam.gov", "query": {"q": q, "posted_from": posted_from, "posted_to": posted_to}, "raw": payload}
+
+
+@app.get(
+    "/v1/opportunities",
+    response_model=OpportunitiesResponse,
+    dependencies=[Depends(require_api_key(settings))],
+)
+async def opportunities(
+    q: str | None = None,
+    posted_from: date | None = None,
+    posted_to: date | None = None,
+    limit: int = 25,
+    offset: int = 0,
+) -> OpportunitiesResponse:
+    _, sam, _, client = _clients()
+    async with client:
+        try:
+            payload = await sam.search_opportunities(
+                q=q, posted_from=posted_from, posted_to=posted_to, limit=limit, offset=offset
+            )
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) from e
+
+        items = [
+            OpportunityItem(external_id=o.external_id, title=o.title, posted_at=o.posted_at, raw=o.raw)
+            for o in normalize_sam_opportunities(payload)
+        ]
+        return OpportunitiesResponse(
+            query={"q": q, "posted_from": posted_from, "posted_to": posted_to, "limit": limit, "offset": offset},
+            items=items,
+            raw=payload,
+        )
 
 
 @app.post(
@@ -249,3 +298,9 @@ async def test_webhook_subscription(sub_id: str) -> WebhookDelivery:
         sent_at_utc=datetime.now(tz=UTC),
         target_url=row["url"],
     )
+
+
+# Mount the frontend last so API routes take precedence.
+_static_dir = Path(__file__).parent / "static"
+if _static_dir.exists():
+    app.mount("/", StaticFiles(directory=_static_dir, html=True), name="static")

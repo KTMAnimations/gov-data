@@ -37,17 +37,25 @@ cp .env.example .env
 PYTHONPATH=src python -m uvicorn govgraph.main:app --reload
 ```
 
+If you see `Address already in use`, pick another port:
+```bash
+PYTHONPATH=src python -m uvicorn govgraph.main:app --reload --port 8001
+```
+
 3) Health check:
 ```bash
 curl -s http://127.0.0.1:8000/healthz | python -m json.tool
 ```
 
-4) Try an opportunity search (requires upstream connectivity + a key depending on SAM config):
+4) Open the frontend console:
+- http://127.0.0.1:8000/
+
+5) Try an opportunity search (requires upstream connectivity + a key depending on SAM config):
 ```bash
 curl -s "http://127.0.0.1:8000/v1/opportunities/search?q=software&limit=10" | python -m json.tool
 ```
 
-5) Create a webhook subscription (GovGraph will POST events to your URL when enabled):
+6) Create a webhook subscription (GovGraph will POST events to your URL when enabled):
 ```bash
 curl -s -X POST http://127.0.0.1:8000/v1/webhooks/subscriptions \
   -H "Content-Type: application/json" \

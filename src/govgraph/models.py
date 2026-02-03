@@ -22,6 +22,13 @@ class SourcesResponse(BaseModel):
     sources: list[SourceStatus]
 
 
+class PublicConfig(BaseModel):
+    version: str
+    requires_api_key: bool
+    enable_poller: bool
+    sources: list[SourceStatus]
+
+
 class ContractorProfile(BaseModel):
     uei: str
     sam_entity: dict[str, Any] | None = None
@@ -29,6 +36,19 @@ class ContractorProfile(BaseModel):
     usaspending_awards: dict[str, Any] | None = None
     generated_at_utc: datetime
     provenance: dict[str, str] = Field(default_factory=dict)
+
+
+class OpportunityItem(BaseModel):
+    external_id: str
+    title: str | None = None
+    posted_at: datetime | None = None
+    raw: dict[str, Any]
+
+
+class OpportunitiesResponse(BaseModel):
+    query: dict[str, Any]
+    items: list[OpportunityItem]
+    raw: dict[str, Any]
 
 
 class WebhookSubscriptionCreate(BaseModel):
@@ -52,4 +72,3 @@ class WebhookDelivery(BaseModel):
     delivery_id: str
     sent_at_utc: datetime
     target_url: HttpUrl
-

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GovGraph Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script defer src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">GovGraph</div>
+          <div class="tag">Procurement + contractor data, normalized</div>
+        </div>
+        <div class="top-actions">
+          <div class="status" id="status">Connecting…</div>
+          <button class="btn btn-secondary" id="open-docs" type="button">API docs</button>
+        </div>
+      </header>
+
+      <div class="layout">
+        <aside class="sidebar">
+          <nav class="nav" aria-label="Primary">
+            <button class="nav-item is-active" data-route="opportunities" type="button">Opportunities</button>
+            <button class="nav-item" data-route="contractors" type="button">Contractors</button>
+            <button class="nav-item" data-route="webhooks" type="button">Webhooks</button>
+            <button class="nav-item" data-route="sources" type="button">Sources</button>
+          </nav>
+
+          <section class="card">
+            <h3 class="card-title">Auth</h3>
+            <label class="label" for="api-key">API key (X-Api-Key)</label>
+            <div class="row">
+              <input class="input" id="api-key" type="password" placeholder="optional" autocomplete="off" />
+              <button class="btn" id="save-key" type="button">Save</button>
+            </div>
+            <p class="muted" id="auth-hint"></p>
+          </section>
+
+          <section class="card">
+            <h3 class="card-title">Tips</h3>
+            <ul class="list">
+              <li>Start with an <b>opportunity search</b> to validate upstream connectivity.</li>
+              <li>Use <b>contractor profiles</b> to join SAM + USAspending by UEI.</li>
+              <li>Webhooks are easiest to test using a request bin or local tunnel.</li>
+            </ul>
+          </section>
+        </aside>
+
+        <main class="main" id="view" aria-live="polite"></main>
+      </div>
+
+      <footer class="footer">
+        <span>As of Feb 3, 2026 • Upstream APIs can change; GovGraph preserves provenance and timestamps.</span>
+      </footer>
+    </div>
+  </body>
+</html>
+
