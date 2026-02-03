@@ -6,6 +6,7 @@ import sqlite3
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, date
 from pathlib import Path
+from re import sub as re_sub
 from typing import Any, AsyncIterator
 
 import httpx
@@ -67,11 +68,34 @@ async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="GovGraph", version="0.1.0", lifespan=_lifespan)
 
 
+def _strip_html(text: str) -> str:
+    # Minimal sanitization for upstream error bodies that may return HTML.
+    # Keep it conservative; we still include the raw body in the error payload.
+    return re_sub(r"<[^>]+>", "", text).strip()
+
+
+def _raise_upstream_error(*, source: str, err: httpx.HTTPStatusError, help_hint: str) -> None:
+    body = err.response.text or ""
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "error": "upstream_error",
+            "source": source,
+            "upstream_status": err.response.status_code,
+            "message": help_hint,
+            "upstream_body": body[:4000],
+            "upstream_body_text": _strip_html(body)[:4000],
+            "upstream_url": str(err.request.url),
+        },
+    )
+
+
 def _source_statuses() -> list[SourceStatus]:
+    sam_configured = bool(settings.api_data_gov_key)
     return [
-        SourceStatus(name="sam.opportunities", base_url=str(settings.sam_opportunities_base_url), configured=True),
-        SourceStatus(name="sam.entity", base_url=str(settings.sam_entity_base_url), configured=True),
-        SourceStatus(name="sam.exclusions", base_url=str(settings.sam_exclusions_base_url), configured=True),
+        SourceStatus(name="sam.opportunities", base_url=str(settings.sam_opportunities_base_url), configured=sam_configured),
+        SourceStatus(name="sam.entity", base_url=str(settings.sam_entity_base_url), configured=sam_configured),
+        SourceStatus(name="sam.exclusions", base_url=str(settings.sam_exclusions_base_url), configured=sam_configured),
         SourceStatus(name="usaspending", base_url=str(settings.usaspending_base_url), configured=True),
     ]
 
@@ -164,7 +188,11 @@ async def opportunities_search(
                 q=q, posted_from=posted_from, posted_to=posted_to, limit=limit, offset=offset
             )
         except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) from e
+            _raise_upstream_error(
+                source="sam.gov",
+                err=e,
+                help_hint="SAM.gov rejected the request. Set GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env, then restart GovGraph.",
+            )
         return {"source": "sam.gov", "query": {"q": q, "posted_from": posted_from, "posted_to": posted_to}, "raw": payload}
 
 
@@ -187,7 +215,11 @@ async def opportunities(
                 q=q, posted_from=posted_from, posted_to=posted_to, limit=limit, offset=offset
             )
         except httpx.HTTPStatusError as e:
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) from e
+            _raise_upstream_error(
+                source="sam.gov",
+                err=e,
+                help_hint="SAM.gov rejected the request. Set GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env, then restart GovGraph.",
+            )
 
         items = [
             OpportunityItem(external_id=o.external_id, title=o.title, posted_at=o.posted_at, raw=o.raw)

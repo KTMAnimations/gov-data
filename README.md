@@ -12,6 +12,9 @@ GovGraph is a small, API-first product that turns **hard-to-use public-sector pr
 
 Endpoints are configurable because upstream APIs evolve.
 
+## Required upstream keys
+- For most SAM.gov endpoints you’ll need an `api.data.gov` key. Set it as `GOVGRAPH_API_DATA_GOV_KEY` in `.env`, then restart GovGraph.
+
 ## What you get
 - A single **“contractor profile”** response that joins multiple sources by UEI.
 - A normalized **opportunity search** endpoint (and a webhook stream for new opportunities).

@@ -27,7 +27,13 @@ async function apiFetch(path, options = {}) {
     json = { raw: text };
   }
   if (!resp.ok) {
-    const message = json?.detail || json?.raw || `HTTP ${resp.status}`;
+    const detail = json?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : typeof detail === "object" && detail
+          ? detail.message || detail.upstream_body_text || JSON.stringify(detail)
+          : json?.raw || `HTTP ${resp.status}`;
     const err = new Error(message);
     err.status = resp.status;
     err.payload = json;
@@ -71,8 +77,11 @@ function renderPage(title, subtitle, bodyChildren) {
 }
 
 function renderError(err) {
-  const hint =
-    err?.status === 401
+  const detail = err?.payload?.detail;
+  const isUpstream = typeof detail === "object" && detail?.error === "upstream_error";
+  const hint = isUpstream
+    ? detail.message
+    : err?.status === 401
       ? "Unauthorized. If GOVGRAPH_API_KEY is set on the server, add it in the Auth panel."
       : "Check upstream connectivity and keys (.env).";
   return el("div", { class: "card" }, [
@@ -140,6 +149,9 @@ function renderSources() {
 }
 
 function renderOpportunities() {
+  const sam = (state.config?.sources || []).find((s) => s.name === "sam.opportunities");
+  const samConfigured = !!sam?.configured;
+
   const q = el("input", { class: "input", placeholder: "search keywords (e.g., cybersecurity)", value: "software" });
   const postedFrom = el("input", { class: "input", type: "date" });
   const postedTo = el("input", { class: "input", type: "date" });
@@ -192,6 +204,18 @@ function renderOpportunities() {
   }
 
   const form = el("div", { class: "grid" }, [
+    !samConfigured
+      ? el("div", { class: "card" }, [
+          el("div", { class: "pill bad" }, ["SAM.gov not configured"]),
+          el("p", { class: "muted" }, [
+            "Opportunity search requires an api.data.gov key. Set ",
+            el("span", { class: "code" }, ["GOVGRAPH_API_DATA_GOV_KEY"]),
+            " in ",
+            el("span", { class: "code" }, [".env"]),
+            ", restart GovGraph, then try again.",
+          ]),
+        ])
+      : null,
     el("div", { class: "grid grid-2" }, [
       el("div", {}, [el("div", { class: "label" }, ["Query"]), q]),
       el("div", {}, [
@@ -212,7 +236,7 @@ function renderOpportunities() {
   ]);
 
   renderPage("Opportunities", "Search SAM.gov opportunities and visualize posting volume.", [form]);
-  runSearch();
+  if (samConfigured) runSearch();
 }
 
 function renderOpportunitiesChart(items) {
@@ -377,6 +401,9 @@ function renderAwardsChart(awards) {
 }
 
 function renderContractors() {
+  const sam = (state.config?.sources || []).find((s) => s.name === "sam.entity");
+  const samConfigured = !!sam?.configured;
+
   const uei = el("input", { class: "input", placeholder: "UEI (e.g., ABCDEFGHIJKLM)", value: "" });
   const out = el("div", { class: "grid" }, []);
   const chartCard = el("div", { class: "card" }, [
@@ -404,6 +431,18 @@ function renderContractors() {
   }
 
   const form = el("div", { class: "grid" }, [
+    !samConfigured
+      ? el("div", { class: "card" }, [
+          el("div", { class: "pill" }, ["Heads up"]),
+          el("p", { class: "muted" }, [
+            "SAM entity + exclusions lookups may be unavailable until you set ",
+            el("span", { class: "code" }, ["GOVGRAPH_API_DATA_GOV_KEY"]),
+            " in ",
+            el("span", { class: "code" }, [".env"]),
+            " and restart GovGraph. USAspending may still work.",
+          ]),
+        ])
+      : null,
     el("div", {}, [el("div", { class: "label" }, ["UEI"]), uei]),
     el("div", { class: "row" }, [
       el("button", { class: "btn", type: "button", onclick: runLookup }, ["Lookup contractor"]),
@@ -495,4 +534,3 @@ async function main() {
 }
 
 main();
-
