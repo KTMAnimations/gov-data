@@ -10,6 +10,7 @@ import httpx
 
 from govgraph.clients.sam import SamClient
 from govgraph.db import kv_get, kv_set, seen_event_add
+from govgraph.security import redact_url
 from govgraph.webhooks import send_webhook
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,11 @@ async def run_opportunity_poller(
             consecutive_errors += 1
             logger.error(
                 "Network error during polling",
-                extra={"error": str(e), "consecutive_errors": consecutive_errors}
+                extra={
+                    "error_type": type(e).__name__,
+                    "url": redact_url(str(e.request.url)) if e.request else None,
+                    "consecutive_errors": consecutive_errors,
+                }
             )
 
         except Exception as e:
@@ -207,4 +212,3 @@ async def run_opportunity_poller(
             await asyncio.sleep(backoff_seconds)
         else:
             await asyncio.sleep(poll_interval_seconds)
-

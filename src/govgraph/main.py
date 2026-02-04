@@ -36,6 +36,7 @@ from govgraph.models import (
     WebhookSubscriptionCreate,
 )
 from govgraph.poller import normalize_sam_opportunities, run_opportunity_poller
+from govgraph.security import redact_url
 from govgraph.settings import Settings
 from govgraph.webhooks import generate_secret, send_webhook
 
@@ -44,6 +45,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+# Avoid logging full request URLs (may include secrets in query params).
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 settings = Settings()
@@ -52,6 +56,13 @@ init_db(db_conn)
 
 # Shared HTTP client for the application
 _http_client: httpx.AsyncClient | None = None
+
+
+def _create_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, connect=10.0),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -71,10 +82,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
     global _http_client
     # Create shared HTTP client
-    _http_client = httpx.AsyncClient(
-        timeout=httpx.Timeout(30.0, connect=10.0),
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
-    )
+    _http_client = _create_http_client()
     logger.info("Application started", extra={"version": "0.1.0"})
 
     task: asyncio.Task | None = None
@@ -131,14 +139,52 @@ def _strip_html(text: str) -> str:
     return re_sub(r"<[^>]+>", "", text).strip()
 
 
+def _parse_upstream_error(body: str) -> tuple[str | None, str | None]:
+    try:
+        parsed = json.loads(body)
+    except Exception:
+        return None, None
+
+    if not isinstance(parsed, dict):
+        return None, None
+
+    err = parsed.get("error")
+    if isinstance(err, dict):
+        code = err.get("code")
+        message = err.get("message") or err.get("detail") or err.get("description")
+        return (str(code) if code is not None else None, str(message) if message is not None else None)
+    if isinstance(err, str):
+        # Some upstreams put a short code/message under "error".
+        return err, parsed.get("message") if isinstance(parsed.get("message"), str) else None
+
+    code = parsed.get("code") or parsed.get("error_code")
+    message = parsed.get("message") or parsed.get("detail") or parsed.get("error_description")
+    return (str(code) if code is not None else None, str(message) if message is not None else None)
+
+
 def _raise_upstream_error(*, source: str, err: httpx.HTTPStatusError, help_hint: str) -> None:
     body = err.response.text or ""
+    upstream_error_code, upstream_error_message = _parse_upstream_error(body)
+    message = help_hint
+    if upstream_error_code == "API_KEY_INVALID":
+        message = (
+            "SAM.gov reports the configured api.data.gov key is invalid. "
+            "Verify GOVGRAPH_API_DATA_GOV_KEY in .env (no quotes/spaces) and that the key is activated."
+        )
+    if upstream_error_message:
+        suffix = f"Upstream: {upstream_error_message}"
+        if upstream_error_code:
+            suffix = f"{suffix} ({upstream_error_code})"
+        message = f"{message} {suffix}"
+
+    redacted_upstream_url = redact_url(str(err.request.url))
     logger.error(
-        f"Upstream API error",
+        "Upstream API error",
         extra={
             "source": source,
             "status_code": err.response.status_code,
-            "url": str(err.request.url),
+            "url": redacted_upstream_url,
+            "upstream_error_code": upstream_error_code,
         }
     )
     raise HTTPException(
@@ -147,10 +193,55 @@ def _raise_upstream_error(*, source: str, err: httpx.HTTPStatusError, help_hint:
             "error": "upstream_error",
             "source": source,
             "upstream_status": err.response.status_code,
-            "message": help_hint,
+            "message": message,
+            "upstream_error_code": upstream_error_code,
+            "upstream_error_message": upstream_error_message,
             "upstream_body": body[:4000],
             "upstream_body_text": _strip_html(body)[:4000],
-            "upstream_url": str(err.request.url),
+            "upstream_url": redacted_upstream_url,
+        },
+    )
+
+
+def _raise_upstream_request_error(*, source: str, err: httpx.RequestError, help_hint: str) -> None:
+    redacted_upstream_url = redact_url(str(err.request.url)) if err.request else None
+    logger.error(
+        "Upstream request error",
+        extra={
+            "source": source,
+            "url": redacted_upstream_url,
+            "error_type": type(err).__name__,
+        },
+    )
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "error": "upstream_unreachable",
+            "source": source,
+            "message": help_hint,
+            "upstream_url": redacted_upstream_url,
+            "upstream_error": type(err).__name__,
+        },
+    )
+
+
+def _raise_upstream_decode_error(*, source: str, upstream_url: str, err: Exception, help_hint: str) -> None:
+    redacted_upstream_url = redact_url(upstream_url)
+    logger.error(
+        "Upstream decode error",
+        extra={
+            "source": source,
+            "url": redacted_upstream_url,
+            "error": str(err),
+        },
+    )
+    raise HTTPException(
+        status_code=502,
+        detail={
+            "error": "upstream_invalid_response",
+            "source": source,
+            "message": help_hint,
+            "upstream_url": redacted_upstream_url,
         },
     )
 
@@ -167,8 +258,11 @@ def _source_statuses() -> list[SourceStatus]:
 
 def _get_http_client() -> httpx.AsyncClient:
     """Get the shared HTTP client."""
+    global _http_client
     if _http_client is None:
-        raise RuntimeError("HTTP client not initialized")
+        # Defensive fallback for environments that don't run lifespan events (or in tests).
+        _http_client = _create_http_client()
+        logger.warning("HTTP client lazily initialized (lifespan not active)")
     return _http_client
 
 
@@ -282,7 +376,20 @@ async def opportunities_search(
         _raise_upstream_error(
             source="sam.gov",
             err=e,
-            help_hint="SAM.gov rejected the request. Set GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env, then restart GovGraph.",
+            help_hint="SAM.gov rejected the request. Check GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env.",
+        )
+    except httpx.RequestError as e:
+        _raise_upstream_request_error(
+            source="sam.gov",
+            err=e,
+            help_hint="Could not reach SAM.gov. Check your network connection and try again.",
+        )
+    except ValueError as e:
+        _raise_upstream_decode_error(
+            source="sam.gov",
+            upstream_url=str(settings.sam_opportunities_base_url),
+            err=e,
+            help_hint="SAM.gov returned an invalid response. Try again later.",
         )
 
     logger.info(
@@ -318,7 +425,20 @@ async def opportunities(
         _raise_upstream_error(
             source="sam.gov",
             err=e,
-            help_hint="SAM.gov rejected the request. Set GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env, then restart GovGraph.",
+            help_hint="SAM.gov rejected the request. Check GOVGRAPH_API_DATA_GOV_KEY (an api.data.gov key) in .env.",
+        )
+    except httpx.RequestError as e:
+        _raise_upstream_request_error(
+            source="sam.gov",
+            err=e,
+            help_hint="Could not reach SAM.gov. Check your network connection and try again.",
+        )
+    except ValueError as e:
+        _raise_upstream_decode_error(
+            source="sam.gov",
+            upstream_url=str(settings.sam_opportunities_base_url),
+            err=e,
+            help_hint="SAM.gov returned an invalid response. Try again later.",
         )
 
     items = [

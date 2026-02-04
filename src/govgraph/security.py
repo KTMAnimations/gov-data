@@ -4,7 +4,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,38 @@ BLOCKED_HOSTNAMES = {
     "metadata",
     "169.254.169.254",
 }
+
+SENSITIVE_QUERY_KEYS = {
+    "api_key",
+    "apikey",
+    "access_token",
+    "token",
+    "key",
+    "x-api-key",
+}
+
+
+def redact_url(url: str, *, sensitive_query_keys: set[str] | None = None, redaction: str = "REDACTED") -> str:
+    """Redact sensitive query params (like API keys) from a URL string."""
+    keys = sensitive_query_keys or SENSITIVE_QUERY_KEYS
+    try:
+        parts = urlsplit(url)
+    except Exception:
+        return url
+
+    if not parts.query:
+        return url
+
+    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    redacted_pairs: list[tuple[str, str]] = []
+    for k, v in query_pairs:
+        if k.lower() in keys:
+            redacted_pairs.append((k, redaction))
+        else:
+            redacted_pairs.append((k, v))
+
+    redacted_query = urlencode(redacted_pairs, doseq=True)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, redacted_query, parts.fragment))
 
 
 def is_safe_webhook_url(url: str) -> tuple[bool, str]:
