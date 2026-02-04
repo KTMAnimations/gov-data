@@ -1,4 +1,4 @@
-# GovGraph
+# gov-data
 
 clean JSON over SAM.gov and USAspending.gov, with a signed webhook on new opportunities.
 
